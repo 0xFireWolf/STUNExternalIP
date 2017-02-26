@@ -8,7 +8,7 @@ The API provided in this library is pretty straightforward.
 int getPublicIPAddress(struct STUNServer server, char* address);
 ```
 This function requires a valid STUN server and a non-null buffer to store the external IP address.
-It returns `0` on success, a negative number on error.
+It returns `0` on success or a negative number on error.
 ```
 struct STUNServer
 {
@@ -17,7 +17,7 @@ struct STUNServer
     unsigned short port;
 };
 ```
-A `STUNServer` contains the `address` and `port` number. `address` can be either a IP address or a domain name.
+A `STUNServer` contains the `address` and `port` number. `address` can be either an IP address or a domain name.
 Check the example code in `main.c`.
 ####Notes
 Not all STUN servers use the XOR mapped address. So this function will return `-5` if it cannot find the XOR mapped address in the response.
