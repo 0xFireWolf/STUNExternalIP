@@ -36,10 +36,6 @@ int main(int argc, const char * argv[])
         {
             printf("%s: Failed. Error: %d\n", server.address, retVal);
         }
-        else
-        {
-            printf("%s: Public IP: %s\n", server.address, address);
-        }
         
         free(address);
     }
