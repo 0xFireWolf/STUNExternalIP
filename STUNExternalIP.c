@@ -257,7 +257,7 @@ int getPublicIPAddress(struct STUNServer server, char* address)
                          (numAddress >> 16) & 0xFF,
                          (numAddress >> 8)  & 0xFF,
                          numAddress & 0xFF);
-                
+                 printf("%s: Public IP: %s and port: %d\n", server.address, address, nat_port);
                 free(localAddress);
                 
                 free(hints);
