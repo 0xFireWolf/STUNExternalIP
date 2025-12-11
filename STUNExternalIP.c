@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <time.h>
 
 // MARK: === PRIVATE DATA STRUCTURE ===
 
