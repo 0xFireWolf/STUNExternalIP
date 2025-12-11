@@ -3,7 +3,8 @@
 //  STUNExternalIP
 //
 //  Created by FireWolf on 2017-02-24.
-//  Copyright © 2017 FireWolf. All rights reserved.
+//  Revised by FireWolf on 2025-12-10.
+//  Copyright © 2017-2025 FireWolf. All rights reserved.
 //
 
 #include <stdio.h>
