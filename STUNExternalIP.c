@@ -191,7 +191,8 @@ int getPublicIPv4Address(struct STUNServer server, struct STUNClient* client, ui
     // Construct a STUN binding request
     srand((uint32_t) time(NULL));
 
-    const struct STUNMessageHeader request = {
+    const struct STUNMessageHeader request =
+    {
         .type = htons(kSTUNMessageTypeBindingRequest),
         .length = htons(0),
         .cookie = htonl(kSTUNMessageCookie),
