@@ -51,7 +51,14 @@ int getPublicIPv4Address(struct STUNServer server, struct STUNClient* client, ui
 > Not all STUN servers use the XOR mapped address. This function returns `kReturnReceiveError` if it cannot find the XOR mapped address in the response message.
 
 ## Compilation
-`cd` to the `STUNExternalIP` directory and type `make` to compile. Type `make clean` to clean up.
+
+A `CMakeLists.txt` file is provided.
+
+```bash
+cd /path/to/STUNExternalIP
+cmake -S . -B build
+cmake --build build
+```
 
 ## Tested Environments
 
