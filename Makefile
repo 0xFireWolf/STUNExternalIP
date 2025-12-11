@@ -1,6 +1,6 @@
 CC=gcc
 CLIBS=-lc
-CFLAGS=-g -Werror-implicit-function-declaration -pedantic -std=gnu11
+CFLAGS=-g -Werror-implicit-function-declaration -pedantic -std=c11
 
 OBJS=STUNExternalIP.o main.o
 
