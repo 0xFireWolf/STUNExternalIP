@@ -9,290 +9,264 @@
 //
 
 #include "STUNExternalIP.h"
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
-#include <time.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <netdb.h>
 
 // MARK: === PRIVATE DATA STRUCTURE ===
 
-// RFC 5389 Section 6 STUN Message Structure
-struct STUNMessageHeader
+/// RFC 5389 Section 6 STUN Message Structure
+enum STUNMessageType
 {
-    // Message Type (Binding Request / Response)
-    unsigned short type;
-    
-    // Payload length of this message
-    unsigned short length;
-    
-    // Magic Cookie
-    unsigned int cookie;
-    
-    // Unique Transaction ID
-    unsigned int identifier[3];
+    kSTUNMessageTypeBindingRequest = 0x0001,
+    kSTUNMessageTypeBindingResponse = 0x0101,
 };
 
-#define XOR_MAPPED_ADDRESS_TYPE 0x0020
+/// RFC 5389 Section 6 STUN Message Structure
+static const uint32_t kSTUNMessageCookie = 0x2112A442;
 
-// RFC 5389 Section 15 STUN Attributes
-struct STUNAttributeHeader
+/// RFC 5389 Section 6 STUN Message Structure
+struct STUNMessageHeader
 {
-    // Attibute Type
-    unsigned short type;
+    /// [BE] Message Type (Binding Request / Response)
+    uint16_t type;
     
-    // Payload length of this attribute
-    unsigned short length;
+    /// [BE] Payload length of this message
+    uint16_t length;
+    
+    /// [BE] Magic Cookie
+    uint32_t cookie;
+    
+    /// [BE] Unique Transaction ID
+    uint32_t identifier[3];
+};
+
+/// RFC 5389 Section 15 STUN Attributes
+enum STUNAttributeType
+{
+    kSTUNAttributeTypeXORMappedAddress = 0x0020,
+};
+
+/// RFC 5389 Section 15 STUN Attributes
+struct STUNAttribute
+{
+    /// [BE] Attribute Type
+    uint16_t type;
+    
+    /// [BE] Payload length of this attribute
+    uint16_t length;
+
+    /// The payload content
+    uint8_t value[0];
 };
 
 #define IPv4_ADDRESS_FAMILY 0x01;
 #define IPv6_ADDRESS_FAMILY 0x02;
 
-// RFC 5389 Section 15.2 XOR-MAPPED-ADDRESS
+/// RFC 5389 Section 15.2 XOR-MAPPED-ADDRESS
 struct STUNXORMappedIPv4Address
 {
-    unsigned char reserved;
-    
-    unsigned char family;
-    
-    unsigned short port;
-    
-    unsigned int address;
+    /// [BE] Reserved, Zeroed
+    uint8_t reserved;
+
+    /// [BE] The address family
+    uint8_t family;
+
+    /// [BE] The external port
+    uint16_t port;
+
+    /// [BE] The external IPv4 address
+    uint32_t address;
 };
+
+///
+/// Resolve the address of a STUN server
+///
+/// @param address The address of a STUN server
+/// @param result The IPv4 address of the STUN server of interest
+/// @return `true` on success, `false` otherwise.
+///
+static bool resolveSTUNServerAddress(const char* address, struct in_addr* result)
+{
+    // A list of resolved IPv4 addresses
+    struct addrinfo* results = NULL;
+
+    // Initialize the hints
+    const struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM };
+
+    // Guard: Resolve the server address
+    if (getaddrinfo(address, NULL, &hints, &results) != 0)
+    {
+        return false;
+    }
+
+    // Guard: Retrieve the result
+    if (results == NULL)
+    {
+        return false;
+    }
+
+    // Read the first socket address in the list
+    *result = ((struct sockaddr_in*) results->ai_addr)->sin_addr;
+
+    // Release the linked list
+    freeaddrinfo(results);
+
+    return true;
+}
 
 ///
 /// Get the external IPv4 address
 ///
 /// @param server A STUN server
-/// @param address A non-null buffer to store the public IPv4 address
-/// @return 0 on success.
-/// @warning This function returns
-///          -1 if failed to bind the socket;
-///          -2 if failed to resolve the given STUN server;
-///          -3 if failed to send the STUN request;
-///          -4 if failed to read from the socket (and timed out; default = 5s);
-///          -5 if failed to get the external address.
+/// @param client A non-null STUN client that stores the IPv4 address and port number on return
+/// @param timeout Specify the timeout in seconds waiting for the response message
+/// @return `kReturnSuccess` on success;
+///         `kReturnSocketError` if failed to create the socket;
+///         `kReturnSocketError` if failed to set the reception timeout for the socket;
+///         `kReturnSocketError` if failed to bind the socket;
+///         `kReturnResolverError` if failed to resolve the address of the given STUN server;
+///         `kReturnSendError` if failed to send the request message to the given STUN server;
+///         `kReturnReceiveError` if failed to read the response message from the socket;
+///         `kReturnReceiveError` if failed to parse the response message returned by the given STUN server.
 ///
-int getPublicIPAddress(struct STUNServer server, char* address)
+int getPublicIPv4Address(struct STUNServer server, struct STUNClient* client, uint32_t timeout)
 {
-    // Create a UDP socket
-    int socketd = socket(AF_INET, SOCK_DGRAM, 0);
-    
-    // Local Address
-    struct sockaddr_in* localAddress = malloc(sizeof(struct sockaddr_in));
-    
-    bzero(localAddress, sizeof(struct sockaddr_in));
-    
-    localAddress->sin_family = AF_INET;
-    
-    localAddress->sin_addr.s_addr = INADDR_ANY;
-    
-    localAddress->sin_port = htons(0);
-    
-    if (bind(socketd, (struct sockaddr*) localAddress, sizeof(struct sockaddr_in)) < 0)
+    // Guard: Create a UDP socket
+    const int socketd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (socketd < 0)
     {
-        free(localAddress);
-        
+        return kReturnSocketError;
+    }
+
+    // Guard: Set the reception timeout for the socket
+    const struct timeval tv = {timeout, 0};
+
+    if (setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval)) != 0)
+    {
+        close(socketd);
+
+        return kReturnSocketError;
+    }
+    
+    // Initialize the local socket address
+    struct sockaddr_in localAddress =
+    {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = INADDR_ANY,
+        .sin_port = htons(0)
+    };
+
+    // Guard: Bind the socket
+    if (bind(socketd, (struct sockaddr*) &localAddress, sizeof(struct sockaddr_in)) < 0)
+    {
         close(socketd);
         
-        return -1;
+        return kReturnSocketError;
+    }
+
+    // Initialize the remote socket address
+    struct sockaddr_in remoteAddress =
+    {
+        .sin_family = AF_INET,
+        .sin_port = htons(server.port)
+    };
+
+    // Guard: Resolve the STUN server address
+    if (!resolveSTUNServerAddress(server.address, &remoteAddress.sin_addr))
+    {
+        close(socketd);
+
+        return kReturnResolverError;
     }
     
-    // Remote Address
-    // First resolve the STUN server address
-    struct addrinfo* results = NULL;
+    // Construct a STUN binding request
+    srand((uint32_t) time(NULL));
+
+    struct STUNMessageHeader request = {
+        .type = htons(kSTUNMessageTypeBindingRequest),
+        .length = htons(0),
+        .cookie = htonl(kSTUNMessageCookie),
+        .identifier[0] = rand(),
+        .identifier[1] = rand(),
+        .identifier[2] = rand(),
+    };
     
-    struct addrinfo* hints = malloc(sizeof(struct addrinfo));
-    
-    bzero(hints, sizeof(struct addrinfo));
-    
-    hints->ai_family = AF_INET;
-    
-    hints->ai_socktype = SOCK_STREAM;
-    
-    if (getaddrinfo(server.address, NULL, hints, &results) != 0)
+    // Guard: Send the request
+    if (sendto(socketd, &request, sizeof(struct STUNMessageHeader), 0, (struct sockaddr*) &remoteAddress, sizeof(struct sockaddr_in)) != sizeof(struct STUNMessageHeader))
     {
-        free(localAddress);
-        
-        free(hints);
-        
         close(socketd);
         
-        return -2;
+        return kReturnSendError;
     }
     
-    struct in_addr stunaddr;
+    // Guard: Read the response
+    uint8_t buffer[512] = {0};
     
-    // `results` is a linked list
-    // Read the first node
-    if (results != NULL)
-    {
-        stunaddr = ((struct sockaddr_in*) results->ai_addr)->sin_addr;
-    }
-    else
-    {
-        free(localAddress);
-        
-        free(hints);
-        
-        freeaddrinfo(results);
-        
-        close(socketd);
-        
-        return -2;
-    }
-    
-    // Create the remote address
-    struct sockaddr_in* remoteAddress = malloc(sizeof(struct sockaddr_in));
-    
-    bzero(remoteAddress, sizeof(struct sockaddr_in));
-    
-    remoteAddress->sin_family = AF_INET;
-    
-    remoteAddress->sin_addr = stunaddr;
-    
-    remoteAddress->sin_port = htons(server.port);
-    
-    // Construct a STUN request
-    struct STUNMessageHeader* request = malloc(sizeof(struct STUNMessageHeader));
-    
-    request->type = htons(0x0001);
-    
-    request->length = htons(0x0000);
-    
-    request->cookie = htonl(0x2112A442);
-    
-    for (int index = 0; index < 3; index++)
-    {
-        srand((unsigned int) time(0));
-        
-        request->identifier[index] = rand();
-    }
-    
-    // Send the request
-    if (sendto(socketd, request, sizeof(struct STUNMessageHeader), 0, (struct sockaddr*) remoteAddress, sizeof(struct sockaddr_in)) == -1)
-    {
-        free(localAddress);
-        
-        free(hints);
-        
-        freeaddrinfo(results);
-        
-        free(remoteAddress);
-        
-        free(request);
-        
-        close(socketd);
-        
-        return -3;
-    }
-    
-    // Set the timeout
-    struct timeval tv = {5, 0};
-    
-    setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(struct timeval));
-    
-    // Read the response
-    char* buffer = malloc(sizeof(char) * 512);
-    
-    bzero(buffer, 512);
-    
-    long length = read(socketd, buffer, 512);
+    const ssize_t length = read(socketd, buffer, sizeof(buffer));
     
     if (length < 0)
     {
-        free(localAddress);
-        
-        free(hints);
-        
-        freeaddrinfo(results);
-        
-        free(remoteAddress);
-        
-        free(request);
-        
-        free(buffer);
-        
         close(socketd);
         
-        return -4;
+        return kReturnReceiveError;
     }
-    
-    char* pointer = buffer;
-    
-    struct STUNMessageHeader* response = (struct STUNMessageHeader*) buffer;
-    
-    if (response->type == htons(0x0101))
+
+    // Guard: Validate the type in the response message header
+    const struct STUNMessageHeader* response = (struct STUNMessageHeader*) buffer;
+
+    if (response->type != htons(kSTUNMessageTypeBindingResponse))
     {
-        // Check the identifer
-        for (int index = 0; index < 3; index++)
-        {
-            if (request->identifier[index] != response->identifier[index])
-            {
-                return -1;
-            }
-        }
-        
-        pointer += sizeof(struct STUNMessageHeader);
-        
-        while (pointer < buffer + length)
-        {
-            struct STUNAttributeHeader* header = (struct STUNAttributeHeader*) pointer;
-            
-            if (header->type == htons(XOR_MAPPED_ADDRESS_TYPE))
-            {
-                pointer += sizeof(struct STUNAttributeHeader);
-                
-                struct STUNXORMappedIPv4Address* xorAddress = (struct STUNXORMappedIPv4Address*) pointer;
-                
-                unsigned int numAddress = htonl(xorAddress->address)^0x2112A442;
-                
-                // Parse the IP address
-                snprintf(address, 20, "%d.%d.%d.%d",
-                         (numAddress >> 24) & 0xFF,
-                         (numAddress >> 16) & 0xFF,
-                         (numAddress >> 8)  & 0xFF,
-                         numAddress & 0xFF);
-                
-                free(localAddress);
-                
-                free(hints);
-                
-                freeaddrinfo(results);
-                
-                free(remoteAddress);
-                
-                free(request);
-                
-                free(buffer);
-                
-                close(socketd);
-                
-                return 0;
-            }
-            
-            pointer += (sizeof(struct STUNAttributeHeader) + ntohs(header->length));
-        }
+        close(socketd);
+
+        return kReturnReceiveError;
     }
-    
-    free(localAddress);
-    
-    free(hints);
-    
-    freeaddrinfo(results);
-    
-    free(remoteAddress);
-    
-    free(request);
-    
-    free(buffer);
+
+    // Guard: Validate the identifier in the response message header
+    if (memcmp(request.identifier, response->identifier, sizeof(request.identifier)) != 0)
+    {
+        close(socketd);
+
+        return kReturnReceiveError;
+    }
+
+    // Parse the response message content
+    uint8_t* current = buffer + sizeof(struct STUNMessageHeader);
+
+    while (current < buffer + length)
+    {
+        // The response message contains a collection of attributes (TLVs)
+        const struct STUNAttribute* attribute = (struct STUNAttribute*) current;
+
+        current += sizeof(struct STUNAttribute) + ntohs(attribute->length);
+
+        // Guard: Look for the attribute that contains an XOR-mapped address
+        if (attribute->type != ntohs(kSTUNAttributeTypeXORMappedAddress))
+        {
+            continue;
+        }
+
+        // Found the attribute that contains an XOR-mapped address
+        const struct STUNXORMappedIPv4Address* content = (struct STUNXORMappedIPv4Address*) attribute->value;
+
+        client->address = ntohl(content->address) ^ kSTUNMessageCookie;
+
+        client->port = ntohs(content->port) ^ (kSTUNMessageCookie >> 16);
+
+        close(socketd);
+
+        return kReturnSuccess;
+    }
     
     close(socketd);
     
-    return -5;
+    return kReturnReceiveError;
 }
 

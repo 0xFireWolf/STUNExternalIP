@@ -16,26 +16,48 @@
 /// Represents a STUN server
 struct STUNServer
 {
-    /// The server address
+    /// The server address (which can be a host name of an IP address)
     const char* address;
 
     /// The server port in host endian
     uint16_t port;
 };
 
+/// Represents a STUN client
+struct STUNClient
+{
+    /// The client IPv4 address in host endian (4 octets)
+    uint32_t address;
+
+    /// The client port in host endian
+    uint16_t port;
+};
+
+/// Enumerates all possible return codes
+enum ReturnCode: int
+{
+    kReturnSuccess = 0,
+    kReturnSocketError = -1,
+    kReturnResolverError = -2,
+    kReturnSendError = -3,
+    kReturnReceiveError = -4,
+};
+
 ///
 /// Get the external IPv4 address
 ///
-/// @param server A valid STUN server
-/// @param address A non-null buffer to store the public IPv4 address
-/// @return 0 on success.
-/// @warning This function returns
-///          -1 if failed to bind the socket;
-///          -2 if failed to resolve the given STUN server;
-///          -3 if failed to send the STUN request;
-///          -4 if failed to read from the socket (and timed out; default = 5s);
-///          -5 if failed to get the external address.
+/// @param server A STUN server
+/// @param client A non-null STUN client that stores the IPv4 address and port number on return
+/// @param timeout Specify the timeout in seconds waiting for the response message
+/// @return `kReturnSuccess` on success;
+///         `kReturnSocketError` if failed to create the socket;
+///         `kReturnSocketError` if failed to set the reception timeout for the socket;
+///         `kReturnSocketError` if failed to bind the socket;
+///         `kReturnResolverError` if failed to resolve the address of the given STUN server;
+///         `kReturnSendError` if failed to send the request message to the given STUN server;
+///         `kReturnReceiveError` if failed to read the response message from the socket;
+///         `kReturnReceiveError` if failed to parse the response message returned by the given STUN server.
 ///
-int getPublicIPAddress(struct STUNServer server, char* address);
+int getPublicIPv4Address(struct STUNServer server, struct STUNClient* client, uint32_t timeout);
 
 #endif /* STUNExternalIP_h */
