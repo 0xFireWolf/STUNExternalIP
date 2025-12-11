@@ -35,7 +35,7 @@ struct STUNClient
 };
 
 /// Enumerates all possible return codes
-enum ReturnCode: int
+enum ReturnCode
 {
     kReturnSuccess = 0,
     kReturnSocketError = -1,
