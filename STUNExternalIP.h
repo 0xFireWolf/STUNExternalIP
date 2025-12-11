@@ -11,11 +11,16 @@
 #ifndef STUNExternalIP_h
 #define STUNExternalIP_h
 
+#include <stdint.h>
+
+/// Represents a STUN server
 struct STUNServer
 {
-    char* address;
-    
-    unsigned short port;
+    /// The server address
+    const char* address;
+
+    /// The server port in host endian
+    uint16_t port;
 };
 
 ///
